@@ -15,12 +15,21 @@ import asyncio
 import dataclasses
 import datetime
 import json
+import logging
 import queue
 import threading
 
 from starlette.responses import JSONResponse, StreamingResponse
 
 from app.domain.models import AgentResult
+
+logger = logging.getLogger(__name__)
+
+# Olay kuyruğu boşken bir sonraki kontrole kadar beklenen süre.
+QUEUE_POLL_INTERVAL_SEC = 0.02
+# Insight metninin kelime kelime yayınlanması sırasında iki token arasındaki
+# gecikme (yalnızca akış temposu; metnin kendisi değişmez).
+INSIGHT_TOKEN_DELAY_SEC = 0.018
 
 
 def _json_default(o):
@@ -31,7 +40,7 @@ def _json_default(o):
         try:
             return o.item()
         except Exception:
-            pass
+            logger.debug("numpy skaleri .item() ile dönüştürülemedi, str() kullanılacak", exc_info=True)
     return str(o)
 
 
@@ -69,7 +78,7 @@ async def ask_stream(request, get_agent):
                 try:
                     evt = evt_queue.get_nowait()
                 except queue.Empty:
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(QUEUE_POLL_INTERVAL_SEC)
                     continue
 
                 kind = evt[0]
@@ -86,7 +95,7 @@ async def ask_stream(request, get_agent):
                     for i, tok in enumerate(tokens):
                         piece = tok if i == len(tokens) - 1 else tok + " "
                         yield sse("insight", {"token": piece})
-                        await asyncio.sleep(0.018)
+                        await asyncio.sleep(INSIGHT_TOKEN_DELAY_SEC)
                 elif kind == "finished":
                     if "fatal" in box:
                         # 'agent_error' (EventSource'un yerleşik 'error' olayıyla

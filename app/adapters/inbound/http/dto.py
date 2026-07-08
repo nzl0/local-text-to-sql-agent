@@ -4,10 +4,13 @@ göstermeden) yapısal JSON'a çevirir; veri tabanının "aktif" olup olmadığ�
 kontrol eder.
 """
 
+import logging
 import re
 from pathlib import Path
 
 from app.adapters.outbound.catalog.static_catalog import CATALOG, file_for
+
+logger = logging.getLogger(__name__)
 
 # DDL içindeki kolon satırlarını yapısal veriye çevirir (ham SQL göstermeden).
 _COL_RE = re.compile(
@@ -20,6 +23,7 @@ def data_ok() -> bool:
     try:
         return all(Path(file_for(t)).exists() for t in CATALOG)
     except Exception:
+        logger.debug("Veri dosyaları kontrol edilirken hata oluştu", exc_info=True)
         return False
 
 

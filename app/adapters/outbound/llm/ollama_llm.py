@@ -8,9 +8,13 @@ Prompt metinlerinin kendisi `prompts.py`'de üretilir; bu sınıf yalnızca
 istemciyi çağırıp ham yanıtı temizler.
 """
 
+import logging
 import os
+from typing import List, Optional
 
 from app.adapters.outbound.llm import prompts
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 
@@ -37,6 +41,7 @@ class OllamaLLM:
             try:
                 available_models = [m.model for m in self.ollama.list().models]
             except Exception:
+                logger.debug("Kurulu Ollama modelleri listelenemedi, istenen ad aynen kullanılacak", exc_info=True)
                 return requested_model
 
         normalized = {m.lower(): m for m in available_models}
@@ -51,12 +56,15 @@ class OllamaLLM:
 
     @staticmethod
     def _log_timing(resp):
-        print(f"[Zamanlama] yükleme={resp.get('load_duration', 0) / 1e9:.2f}s | "
-              f"prompt_işleme={resp.get('prompt_eval_duration', 0) / 1e9:.2f}s | "
-              f"üretim={resp.get('eval_duration', 0) / 1e9:.2f}s | "
-              f"üretilen_token={resp.get('eval_count', '?')}")
+        logger.debug(
+            "[Zamanlama] yükleme=%.2fs | prompt_işleme=%.2fs | üretim=%.2fs | üretilen_token=%s",
+            resp.get("load_duration", 0) / 1e9,
+            resp.get("prompt_eval_duration", 0) / 1e9,
+            resp.get("eval_duration", 0) / 1e9,
+            resp.get("eval_count", "?"),
+        )
 
-    def generate_sql(self, question: str, schema_ddl: str, glossary: list = None) -> str:
+    def generate_sql(self, question: str, schema_ddl: str, glossary: Optional[List[str]] = None) -> str:
         """Bir soru ve tablo şeması verildiğinde ona uygun DuckDB SQL sorgusu üretir."""
         system, prompt = prompts.build_generate_sql_prompt(question, schema_ddl, glossary)
 
@@ -68,13 +76,13 @@ class OllamaLLM:
             options={"temperature": 0.0},
         )
         raw = resp["response"]
-        # --- TEŞHİS (sorun çözülünce bu satırı silebilirsin) ---
-        print(f"[HAM YANIT len={len(raw)}]: {raw[:300]!r}")
+        logger.debug("[HAM YANIT len=%d]: %r", len(raw), raw[:300])
         self._log_timing(resp)
-        # -------------------------------------------------------
         return prompts.clean_sql(raw)
 
-    def fix_sql(self, question: str, broken_sql: str, error: str, schema_ddl: str, glossary: list = None) -> str:
+    def fix_sql(
+        self, question: str, broken_sql: str, error: str, schema_ddl: str, glossary: Optional[List[str]] = None
+    ) -> str:
         """
         Çalışmayan bir SQL'i, orijinal kullanıcı sorusu ve DuckDB'nin verdiği hata
         mesajıyla birlikte modele geri verip, niyetten sapmadan düzelttirir.
@@ -91,7 +99,7 @@ class OllamaLLM:
         self._log_timing(resp)
         return prompts.clean_sql(resp["response"])
 
-    def generate_insight(self, question: str, columns, rows) -> str:
+    def generate_insight(self, question: str, columns: List[str], rows: List[dict]) -> str:
         """
         SQL sonucunu Türkçe bir cümleye çevirir. Gerçek değerler (ürün kodu,
         sayılar) modelin belleğinden DEĞİL, doğrudan 'rows'tan gelir:

@@ -11,8 +11,8 @@ Reddedilenler:
   - ';' ile art arda bağlanmış birden fazla ifade (yalnızca tek statement).
   - Boş/anlamsız girdi.
 
-Her ret bir ValueError fırlatır. engine.py'deki mevcut try/except bunu
-normal bir "SQL çalıştırılamadı" hatası gibi yakalar; agent.py'nin
+Her ret bir ValueError fırlatır. DuckDBEngine.run()'daki try/except bunu
+normal bir "SQL çalıştırılamadı" hatası gibi yakalar; AskQuestionUseCase'in
 auto-fix/retry döngüsü de bunu diğer DuckDB hatalarından ayırt etmeden
 modele geri verip düzelttirmeye çalışır. Guard, mevcut hata-onarım akışına
 hiçbir özel durum eklemeden entegre olur.

@@ -8,8 +8,16 @@ Dışarıya verdiği `ask()` arayüzü sabit kalır; bu yüzden UI veya CLI tara
 bu kontrata göre çalışır.
 """
 
+import logging
+
 from app.domain.models import AgentResult
 from app.domain.ports import LlmPort, QueryEngine, TableRetriever
+
+logger = logging.getLogger(__name__)
+
+# Bir SQL çalıştırma denemesi başarısız olursa modelin kaç kez düzeltme
+# denemesine izin verilir (ilk deneme dahil).
+MAX_ATTEMPTS = 3
 
 
 class AskQuestionUseCase:
@@ -25,8 +33,6 @@ class AskQuestionUseCase:
         if not question or not question.strip():
             return AgentResult(question=question, tables=[], sql="", error="Soru boş olamaz.")
 
-        # 1. İlgili tabloları ve sözlük maddelerini bul (soru embedding'i tek
-        # seferde hesaplanır, hem tablo hem sözlük karşılaştırmasında kullanılır)
         tables, relevant_glossary = self.retriever.find_tables_and_glossary(question)
 
         # Hiçbir tablo eşiği geçmediyse (retriever artık zorla bir tablo
@@ -41,50 +47,25 @@ class AskQuestionUseCase:
                 error="Sorunuzla ilgili bir veri tablosu bulunamadı. Soruyu farklı ifade etmeyi deneyin.",
             )
 
-        # 3. Sadece bu tabloların DDL'ini topla
         schema_ddl = self.ddl_for(tables)
-
-        # 4. SQL üret
         sql = self.llm.generate_sql(question, schema_ddl, relevant_glossary)
-        print("[Üretilen SQL]:", sql)
+        logger.debug("Üretilen SQL: %s", sql)
 
-        # 5. Çalıştır (Sadece SEÇİLEN tablolar engine'e paslanır!)
-        MAX_DENEME = 3
-        columns, rows = None, None
-        retry_count = 0
-        last_error = None
-        auto_fixes = []  # Her onarım denemesinin yapısal kaydı (UI rozetleri buradan beslenir)
-
-        for deneme in range(MAX_DENEME):
-            try:
-                # tables listesi de engine'e gönderilir
-                columns, rows = self.engine.run(sql, tables)
-                break
-            except Exception as e:
-                retry_count = deneme + 1
-                last_error = str(e)
-                if deneme == MAX_DENEME - 1:
-                    return AgentResult(
-                        question=question, tables=tables, sql=sql,
-                        retry_count=retry_count, auto_fixes=auto_fixes,
-                        error=f"SQL çalıştırılamadı: {last_error}"
-                    )
-                print(f"[Onarım {deneme + 1}] Hata alındı, modele düzelttiriliyor: {e}")
-                broken_sql = sql
-                sql = self.llm.fix_sql(question, sql, str(e), schema_ddl, relevant_glossary)
-                print("[Düzeltilmiş SQL]:", sql)
-                # Düzeltmeyi yapısal olarak kaydet: hangi hata, hangi SQL'den hangi SQL'e.
-                auto_fixes.append({
-                    "attempt": deneme + 1,
-                    "error": last_error,
-                    "broken_sql": broken_sql,
-                    "fixed_sql": sql,
-                })
+        sql, columns, rows, retry_count, auto_fixes, error = self._run_with_auto_fix(
+            question, sql, tables, schema_ddl, relevant_glossary
+        )
+        if error:
+            return AgentResult(
+                question=question, tables=tables, sql=sql,
+                retry_count=retry_count, auto_fixes=auto_fixes, error=error,
+            )
 
         if not rows:
-            return AgentResult(question=question, tables=tables, sql=sql, columns=columns, rows=[], insight="Sorguya uyan kayıt bulunamadı.", retry_count=retry_count, auto_fixes=auto_fixes)
+            return AgentResult(
+                question=question, tables=tables, sql=sql, columns=columns, rows=[],
+                insight="Sorguya uyan kayıt bulunamadı.", retry_count=retry_count, auto_fixes=auto_fixes,
+            )
 
-        # 5. Modelin yorumunu al
         insight = self.llm.generate_insight(question, columns, rows)
 
         return AgentResult(
@@ -97,3 +78,36 @@ class AskQuestionUseCase:
             retry_count=retry_count,
             auto_fixes=auto_fixes,
         )
+
+    def _run_with_auto_fix(self, question, sql, tables, schema_ddl, glossary):
+        """SQL'i çalıştırır; hata alırsa modele düzelttirip MAX_ATTEMPTS'e kadar
+        yeniden dener.
+
+        Döner: (sql, columns, rows, retry_count, auto_fixes, error). `error`
+        yalnızca son deneme de başarısız olduğunda dolu gelir; çağıran taraf
+        bunu erken çıkış sinyali olarak kullanır.
+        """
+        columns, rows = None, None
+        retry_count = 0
+        last_error = None
+        auto_fixes = []  # Her onarım denemesinin yapısal kaydı (UI rozetleri buradan beslenir)
+
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                columns, rows = self.engine.run(sql, tables)
+                return sql, columns, rows, retry_count, auto_fixes, None
+            except Exception as e:
+                retry_count = attempt + 1
+                last_error = str(e)
+                if attempt == MAX_ATTEMPTS - 1:
+                    return sql, columns, rows, retry_count, auto_fixes, f"SQL çalıştırılamadı: {last_error}"
+                logger.debug("Onarım denemesi %d: hata alındı, modele düzelttiriliyor: %s", attempt + 1, e)
+                broken_sql = sql
+                sql = self.llm.fix_sql(question, sql, str(e), schema_ddl, glossary)
+                logger.debug("Düzeltilmiş SQL: %s", sql)
+                auto_fixes.append({
+                    "attempt": attempt + 1,
+                    "error": last_error,
+                    "broken_sql": broken_sql,
+                    "fixed_sql": sql,
+                })

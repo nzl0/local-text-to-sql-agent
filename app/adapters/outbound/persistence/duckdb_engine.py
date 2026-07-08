@@ -10,27 +10,29 @@ yapılır: LLM'in ürettiği SQL yalnızca sistem prompt'undaki "sadece SELECT
 sorgu olduğu doğrulanmadan çalıştırılmaz.
 """
 
+from typing import Any, Dict, List, Tuple
+
 from app.adapters.outbound.security.sql_guard import validate_select_only
 
 
 class DuckDBEngine:
-    def __init__(self, catalog, file_resolver):
+    def __init__(self, catalog: dict, file_resolver):
         self.catalog = catalog
         self.file_for = file_resolver
 
-    def run(self, sql: str, tables: list):
-        """Sadece retriever tarafından seçilen (tables) Excel dosyalarını register eder."""
+    def run(self, sql: str, tables: List[str]) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """Sadece çağıran tarafından seçilen (tables) Excel dosyalarını register eder."""
         import duckdb
         import pandas as pd
 
         # Çalıştırmadan ÖNCE statik doğrulama. Ret durumunda ValueError
-        # fırlar; bu, agent.py'deki mevcut try/except tarafından diğer
+        # fırlar; bu, AskQuestionUseCase'in try/except'i tarafından diğer
         # DuckDB hatalarıyla aynı şekilde yakalanıp modele düzelttirilir.
         validate_select_only(sql)
 
         con = duckdb.connect(":memory:")
         try:
-            # ELEŞTİRİ 1 ÇÖZÜMÜ: catalog yerine dışarıdan gelen 'tables' listesinde dönüyoruz
+            # Katalogdaki tüm tablolar değil, yalnızca dışarıdan seçilen 'tables' register edilir.
             for table in tables:
                 if table in self.catalog:
                     df = pd.read_excel(self.file_for(table))

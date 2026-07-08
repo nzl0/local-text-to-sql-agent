@@ -165,7 +165,7 @@ aynı origin'den çalışır ve CORS gerekmez.
 | Profil avatarı (renk/şekil/başlık) | `web/src/components/ProfileAvatar.tsx` |
 | Aşama etiketleri (bulma/üretim/…) | `web/src/components/StageTracker.tsx` → `STAGES` |
 | Hata / boş sonuç / başarı metinleri | `web/src/components/MessageCard.tsx` |
-| Insight akış hızı (token gecikmesi) | `app/adapters/inbound/http/sse.py` → `event_source()` içindeki `asyncio.sleep(0.018)` |
+| Insight akış hızı (token gecikmesi) | `app/adapters/inbound/http/sse.py` → `INSIGHT_TOKEN_DELAY_SEC` sabiti |
 | CSV dosya adı / ayraç / kodlama | `web/src/components/ResultTable.tsx` |
 
 > Her renk değişikliğinden sonra `npm run build` ile `dist/`'i yeniden üretin.
