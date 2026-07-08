@@ -1,0 +1,8 @@
+sentence-transformers   # retriever.py - E5Retriever (SentenceTransformer embedding modeli)
+duckdb                  # engine.py - DuckDBEngine (SQL sorgularını çalıştırır)
+pandas                  # engine.py - Excel okuma (pd.read_excel)
+openpyxl                # engine.py - pandas'ın .xlsx dosyalarını okuyabilmesi için motor
+ollama                  # llm.py - OllamaLLM (yerel LLM ile SQL üretimi/yorum)
+sqlglot                 # sql_guard.py - çalıştırmadan önce SQL'in tek/salt-okunur olduğunu doğrular
+starlette               # api.py - React arayüzünün SSE/HTTP katmanı (routing, StaticFiles, middleware)
+uvicorn                 # api.py - Starlette uygulamasını çalıştıran ASGI sunucusu
