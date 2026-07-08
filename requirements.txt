@@ -1,8 +1,8 @@
-sentence-transformers   # retriever.py - E5Retriever (SentenceTransformer embedding modeli)
-duckdb                  # engine.py - DuckDBEngine (SQL sorgularını çalıştırır)
-pandas                  # engine.py - Excel okuma (pd.read_excel)
-openpyxl                # engine.py - pandas'ın .xlsx dosyalarını okuyabilmesi için motor
-ollama                  # llm.py - OllamaLLM (yerel LLM ile SQL üretimi/yorum)
-sqlglot                 # sql_guard.py - çalıştırmadan önce SQL'in tek/salt-okunur olduğunu doğrular
-starlette               # api.py - React arayüzünün SSE/HTTP katmanı (routing, StaticFiles, middleware)
-uvicorn                 # api.py - Starlette uygulamasını çalıştıran ASGI sunucusu
+sentence-transformers   # app/adapters/outbound/retrieval/e5_retriever.py - E5Retriever (SentenceTransformer embedding modeli)
+duckdb                  # app/adapters/outbound/persistence/duckdb_engine.py - DuckDBEngine (SQL sorgularını çalıştırır)
+pandas                  # app/adapters/outbound/persistence/duckdb_engine.py - Excel okuma (pd.read_excel)
+openpyxl                # pandas'ın .xlsx dosyalarını okuyabilmesi için motor
+ollama                  # app/adapters/outbound/llm/ollama_llm.py - OllamaLLM (yerel LLM ile SQL üretimi/yorum)
+sqlglot                 # app/adapters/outbound/security/sql_guard.py - çalıştırmadan önce SQL'in tek/salt-okunur olduğunu doğrular
+starlette               # app/adapters/inbound/http/server.py - React arayüzünün SSE/HTTP katmanı (routing, StaticFiles, middleware)
+uvicorn                 # server.py - Starlette uygulamasını çalıştıran ASGI sunucusu

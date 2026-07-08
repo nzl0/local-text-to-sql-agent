@@ -1,42 +1,24 @@
 """
-ORKESTRASYON MODÜLÜ: kullanıcı sorusunu alıp tüm metin-to-SQL akışını
-çalıştıran ana pipeline bileşenidir.
+ORKESTRASYON KATMANI: kullanıcı sorusunu alıp tüm metin-to-SQL akışını
+çalıştıran ana use-case bileşenidir.
 
-Bu modül, retriever, llm ve engine parçalarını sırayla çağırır. Backend
-değişse bile dışarıya verdiği `ask()` arayüzü sabit kalır; bu yüzden UI veya
-CLI tarafı bu kontrata göre çalışır.
+Bu modül, retriever, llm ve engine port'larını (domain.ports) sırayla
+çağırır; hangi somut adapter'ın (E5, Ollama, DuckDB) kullanıldığını bilmez.
+Dışarıya verdiği `ask()` arayüzü sabit kalır; bu yüzden UI veya CLI tarafı
+bu kontrata göre çalışır.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from catalog import ddl_for
-
-@dataclass
-class AgentResult:
-    """
-    Üretim ortamının (Observability) temelidir. UI katmanı, loglama 
-    sistemleri ve test araçları aradığı her teknik veriyi bu pakette bulur.
-    """
-    question: str
-    tables: List[str]
-    sql: str
-    columns: Optional[List[str]] = None
-    rows: Optional[List[Dict[str, Any]]] = None
-    insight: str = ""
-    retry_count: int = 0
-    # Otomatik onarım denemelerinin yapısal kaydı. Her öğe bir düzeltmeyi
-    # temsil eder: {attempt, error, broken_sql, fixed_sql}. UI turuncu
-    # "otomatik düzeltme" rozetlerini doğrudan bu listeden besler.
-    auto_fixes: List[Dict[str, Any]] = field(default_factory=list)
-    error: Optional[str] = None
+from app.domain.models import AgentResult
+from app.domain.ports import LlmPort, QueryEngine, TableRetriever
 
 
-class Agent:
-    def __init__(self, retriever, llm, engine):
-        """Dışarıdan gelen retriever, llm ve engine nesnelerini saklar."""
+class AskQuestionUseCase:
+    def __init__(self, retriever: TableRetriever, llm: LlmPort, engine: QueryEngine, ddl_for):
+        """Dışarıdan gelen port implementasyonlarını ve DDL çözümleyiciyi saklar."""
         self.retriever = retriever
         self.llm = llm
         self.engine = engine
+        self.ddl_for = ddl_for
 
     def ask(self, question: str) -> AgentResult:
         """Kullanıcı sorusuna karşılık biçimlendirilmiş string değil, zengin bir nesne döner."""
@@ -60,7 +42,7 @@ class Agent:
             )
 
         # 3. Sadece bu tabloların DDL'ini topla
-        schema_ddl = ddl_for(tables)
+        schema_ddl = self.ddl_for(tables)
 
         # 4. SQL üret
         sql = self.llm.generate_sql(question, schema_ddl, relevant_glossary)
@@ -75,7 +57,7 @@ class Agent:
 
         for deneme in range(MAX_DENEME):
             try:
-                # ELEŞTİRİ 1 ÇÖZÜMÜ: tables listesini de engine'e gönderiyoruz
+                # tables listesi de engine'e gönderilir
                 columns, rows = self.engine.run(sql, tables)
                 break
             except Exception as e:
@@ -89,7 +71,7 @@ class Agent:
                     )
                 print(f"[Onarım {deneme + 1}] Hata alındı, modele düzelttiriliyor: {e}")
                 broken_sql = sql
-                sql = self.llm.fix_sql(question, sql, str(e), schema_ddl,relevant_glossary)
+                sql = self.llm.fix_sql(question, sql, str(e), schema_ddl, relevant_glossary)
                 print("[Düzeltilmiş SQL]:", sql)
                 # Düzeltmeyi yapısal olarak kaydet: hangi hata, hangi SQL'den hangi SQL'e.
                 auto_fixes.append({
@@ -105,7 +87,6 @@ class Agent:
         # 5. Modelin yorumunu al
         insight = self.llm.generate_insight(question, columns, rows)
 
-        # ELEŞTİRİ 2 ÇÖZÜMÜ: Ham string yerine tüm verileri içeren dataclass paketini dönüyoruz
         return AgentResult(
             question=question,
             tables=tables,

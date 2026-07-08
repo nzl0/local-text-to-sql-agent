@@ -10,7 +10,7 @@ yapılır: LLM'in ürettiği SQL yalnızca sistem prompt'undaki "sadece SELECT
 sorgu olduğu doğrulanmadan çalıştırılmaz.
 """
 
-from sql_guard import validate_select_only
+from app.adapters.outbound.security.sql_guard import validate_select_only
 
 
 class DuckDBEngine:

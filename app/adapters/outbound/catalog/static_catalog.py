@@ -8,7 +8,8 @@ bu sözlüğe yeni bir kayıt eklemek olur; diğer dosyalara müdahale gerekmez.
 
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+DATA_DIR = REPO_ROOT / "data"
 
 # 1. Şirket İçi Sözlük / Jargon Tanımları
 DB_GLOSSARY = [

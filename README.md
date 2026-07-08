@@ -10,18 +10,25 @@ Bu proje, yerel ortamda çalışan bir Text-to-SQL ajanıdır. Kullanıcı sorul
 5. Sonuç kısa bir Türkçe yoruma dönüştürülür.
 
 ## Proje dosyaları
-- `catalog.py`: Tek doğruluk kaynağı. Tabloların dosya yolu, DDL ve pasaj bilgileri burada tanımlanır.
-- `retriever.py`: E5 embedding tabanlı tablo seçimi.
-- `llm.py`: Ollama ile SQL üretimi ve sonuç yorumu.
-- `sql_guard.py`: SQL çalıştırılmadan önce tek/salt-okunur bir SELECT olduğunu doğrular.
-- `engine.py`: DuckDB + pandas ile Excel verilerinin çalıştırılması.
-- `agent.py`: Ana iş akışını yöneten orchestrator.
-- `main.py`: CLI giriş noktası (terminalden tek soru-cevap döngüsü).
-- `api.py`: **Birincil arayüzün** sunucusu — `agent.ask()`'i SSE üzerinden React arayüzüne açar, `dist/`'i servis eder.
-- `web/`: React/Vite arayüzünün kaynak kodu (`npm run build` ile `dist/`'e derlenir).
-- `run.bat`: Windows'ta web arayüzünü (uvicorn + `api.py`) başlatan kısayol.
 
-Proje tek bir arayüz üzerinden kullanılır: **React arayüzü** (`web/` + `api.py`,
+Backend, **hexagonal (ports & adapters) mimarisiyle** `app/` altında
+organize edilmiştir (detaylı katman açıklaması için `BAKIM.md` Bölüm 1):
+
+- `app/domain/`: `AgentResult` modeli + port arayüzleri (dış kütüphane bağımlılığı yok).
+- `app/application/ask_question.py`: Ana iş akışını yöneten use-case (`AskQuestionUseCase`).
+- `app/adapters/outbound/catalog/static_catalog.py`: Tek doğruluk kaynağı. Tabloların dosya yolu, DDL ve pasaj bilgileri burada tanımlanır.
+- `app/adapters/outbound/retrieval/e5_retriever.py`: E5 embedding tabanlı tablo seçimi.
+- `app/adapters/outbound/llm/ollama_llm.py` + `llm/prompts.py`: Ollama ile SQL üretimi ve sonuç yorumu.
+- `app/adapters/outbound/security/sql_guard.py`: SQL çalıştırılmadan önce tek/salt-okunur bir SELECT olduğunu doğrular.
+- `app/adapters/outbound/persistence/duckdb_engine.py`: DuckDB + pandas ile Excel verilerinin çalıştırılması.
+- `app/adapters/inbound/cli/console.py`: CLI döngüsü (terminalden tek soru-cevap döngüsü).
+- `app/adapters/inbound/http/`: **Birincil arayüzün** sunucusu — `AskQuestionUseCase.ask()`'i SSE üzerinden React arayüzüne açar, `dist/`'i servis eder.
+- `app/config/container.py`: composition root (`build_agent()`).
+- `main.py` / `server.py`: kök seviyesindeki ince giriş noktaları.
+- `web/`: React/Vite arayüzünün kaynak kodu (`npm run build` ile `dist/`'e derlenir).
+- `run.bat`: Windows'ta web arayüzünü (uvicorn + `server.py`) başlatan kısayol.
+
+Proje tek bir arayüz üzerinden kullanılır: **React arayüzü** (`web/` + `server.py`,
 tarayıcıdan `http://localhost:8000`). `main.py`, arayüzsüz/terminalden hızlı test
 için ayrı bir CLI giriş noktası olarak kalır; birbirine bağımlı değillerdir.
 
@@ -45,7 +52,7 @@ için ayrı bir CLI giriş noktası olarak kalır; birbirine bağımlı değille
 
 ## Çalıştırma
 **Web arayüzü** (önerilen, Windows'ta):
-- `./.venv/Scripts/python.exe -m uvicorn api:app --host 0.0.0.0 --port 8000`
+- `./.venv/Scripts/python.exe -m uvicorn server:app --host 0.0.0.0 --port 8000`
 - veya `run.bat`
 - Tarayıcıdan `http://localhost:8000`. Detaylı mimari/geliştirme modu için `BAKIM.md`.
 
