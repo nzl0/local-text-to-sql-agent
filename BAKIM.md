@@ -11,43 +11,41 @@ nasıl derlenip çalıştırılacağını ve nereden özelleştirileceğini anla
 Tarayıcı (React SPA, dist/)
         │  GET /api/ask?q=...   (SSE, EventSource)
         ▼
-app/adapters/inbound/http/server.py  (Starlette + uvicorn) ── ince HTTP/SSE katmanı
-        │  AskQuestionUseCase.ask(question)  (ayrı thread)
+app/server.py  (Starlette + uvicorn) ── HTTP/SSE katmanı + instrumentation
+        │  Agent.ask(question)  (ayrı thread)
         ▼
-app/application/ask_question.py
-        │  domain.ports üzerinden çağırır
+app/agent.py
+        │  retriever / llm / engine nesnelerini sırayla çağırır
         ▼
-app/adapters/outbound/retrieval (E5) → app/adapters/outbound/llm (Ollama)
-        → app/adapters/outbound/persistence (DuckDB+Excel)
+app/retriever.py (E5) → app/llm.py (Ollama) → app/engine.py (DuckDB+Excel)
 ```
 
-Backend, **hexagonal (ports & adapters) mimarisiyle** `app/` altında
-organize edilmiştir:
+Backend, `app/` altında **düz (tek seviyeli) modüller** halinde
+organize edilmiştir — alt klasör yok, her dosya tek bir sorumluluk taşır:
 
-- `app/domain/` — `AgentResult` modeli ve `Protocol` tabanlı port
-  arayüzleri (`TableRetriever`, `LlmPort`, `QueryEngine`). Hiçbir dış
-  kütüphaneye bağımlı değildir.
-- `app/application/ask_question.py` — `AskQuestionUseCase`: eski
-  `agent.py`'deki orkestrasyon (tablo bulma → SQL üretimi → çalıştırma →
-  onarım → yorumlama) birebir aynı davranışla burada yaşar. Somut
-  retriever/LLM/engine'i bilmez, yalnızca port'lara bağımlıdır.
-- `app/adapters/outbound/` — somut implementasyonlar: `retrieval/e5_retriever.py`
-  (E5 embedding), `llm/ollama_llm.py` + `llm/prompts.py` (Ollama + prompt
-  metinleri ayrıştırıldı), `persistence/duckdb_engine.py` (DuckDB+Excel),
-  `security/sql_guard.py` (SELECT-only doğrulama), `catalog/static_catalog.py`
-  (tablo/DDL/passage kataloğu).
-- `app/adapters/inbound/` — dış dünyadan gelen istekleri use-case'e
-  çeviren adapter'lar: `cli/console.py` (terminal) ve `http/` (Starlette
-  sunucusu: `server.py` routing, `sse.py` SSE akışı, `instrumentation.py`
-  eski `_instrument()` mantığı, `dto.py` JSON şekillendirme).
-- `app/config/container.py` — composition root: `build_agent()` somut
-  adapter'ları kurup `AskQuestionUseCase`'e enjekte eder.
-- Kök `main.py` ve `server.py` sadece ilgili adapter'ı çağıran ince giriş
-  noktalarıdır (`python main.py` → CLI, `uvicorn server:app` → HTTP).
+- `app/models.py` — `AgentResult` sonuç paketi.
+- `app/catalog.py` — tablo/DDL/passage kataloğu (tek doğruluk kaynağı).
+- `app/retriever.py` — `E5Retriever`: E5 embedding tabanlı tablo bulma.
+- `app/llm.py` — `OllamaLLM` istemcisi + prompt metinleri (SQL üretimi,
+  onarımı, sonuç yorumu).
+- `app/sql_guard.py` — SELECT-only statik doğrulama.
+- `app/engine.py` — `DuckDBEngine`: DuckDB + Excel çalıştırma.
+- `app/agent.py` — `Agent` sınıfı (orkestrasyon: tablo bulma → SQL üretimi →
+  çalıştırma → onarım → yorumlama) + `build_agent()` (gerçek
+  retriever/llm/engine nesnelerini kurup `Agent`'a enjekte eden fabrika).
+- `app/cli.py` — terminal döngüsü.
+- `app/server.py` — Starlette sunucusu: routing, SSE akışı, instrumentation
+  (`_instrument()`), JSON şekillendirme (`sources`/`security` uç noktaları)
+  hepsi tek dosyada.
+- Kök `main.py` — **tek giriş noktası**. Argümansız → web arayüzü
+  (`app/server.py`'yi uvicorn ile başlatır); `--cli` → terminal modu
+  (`app/cli.py`); `--reload` → geliştirme modunda otomatik yeniden başlatma.
+  İki ayrı kök script yerine tek dosya + mod bayrakları.
 
-**Davranış değişmedi**, yalnızca dosya organizasyonu ve bağımlılık yönü
-değişti: `AgentResult`'taki `auto_fixes` listesi, SSE event kontratı, CLI
-çıktı formatı ve prompt metinleri birebir aynıdır.
+**Davranış değişmedi**, yalnızca dosya organizasyonu sadeleşti (önceki
+hexagonal/ports-adapters katmanları kaldırıldı): `AgentResult`'taki
+`auto_fixes` listesi, SSE event kontratı, CLI çıktı formatı ve prompt
+metinleri birebir aynıdır.
 
 - **FastAPI yerine Starlette** kullanıldı: FastAPI zaten Starlette üstünde
   çalışır ve Starlette ortamda kurulu olduğundan ek Python paketi
@@ -63,7 +61,7 @@ Bunlar `agent.ask()`'e dokunmaz; yalnızca katalog/durum bilgisini okur:
 | `GET /api/sources` | tablolar + kolonlar (ham SQL değil) | "Veri Kaynakları" görünümü |
 | `GET /api/security` | güvenlik/bağlantı duruşu | "Güvenlik Kontrolleri" görünümü |
 
-### SSE olay kontratı (`app/adapters/inbound/http/sse.py` yayınlar, `web/src/lib/api.ts` tüketir)
+### SSE olay kontratı (`app/server.py` yayınlar, `web/src/lib/api.ts` tüketir)
 
 | event         | data                                                    |
 | ------------- | ------------------------------------------------------- |
@@ -109,14 +107,12 @@ tek bir dış (CDN) istek yoktur.
 
 ```bash
 # repo kökünde:
-.venv/Scripts/python.exe -m uvicorn server:app --host 0.0.0.0 --port 8000
+.venv/Scripts/python.exe main.py
 ```
 
 Tarayıcıdan **http://localhost:8000** (veya yerel ağdan makinenin IP'si:8000).
-`server.py` (→ `app/adapters/inbound/http/server.py`) `dist/` varsa onu otomatik servis eder.
-
-> Tek komutluk başlatıcı için `run.bat` zaten yukarıdaki uvicorn komutunu
-> çağırır — çift tıklayarak da başlatabilirsiniz.
+Kök `main.py`, `app/server.py`'yi uvicorn ile başlatır; `dist/` varsa onu
+otomatik servis eder. Host/port değiştirmek için `--host` / `--port`.
 
 ---
 
@@ -125,8 +121,8 @@ Tarayıcıdan **http://localhost:8000** (veya yerel ağdan makinenin IP'si:8000)
 İki terminal:
 
 ```bash
-# 1) Backend
-.venv/Scripts/python.exe -m uvicorn server:app --host 127.0.0.1 --port 8000
+# 1) Backend (kod değişince otomatik yeniden başlar)
+.venv/Scripts/python.exe main.py --reload --host 127.0.0.1
 
 # 2) Frontend (Vite dev sunucusu, 5173)
 cd web
@@ -157,7 +153,7 @@ aynı origin'den çalışır ve CORS gerekmez.
 | **ASELSAN logosu** (resmi dosyayı koy) | `web/src/assets/aselsan-logo.svg` (veya `.png`/`.webp`) — bkz. Bölüm 9 |
 | Sol menü etiketleri/ikonları | `web/src/components/Sidebar.tsx` → `NAV` |
 | Sağ statü paneli (DB/gizlilik) | `web/src/components/StatusPanel.tsx` |
-| Gizlilik sınıflandırması ("GİZLİ") | `app/adapters/inbound/http/server.py` → `security()` + `StatusPanel.tsx` |
+| Gizlilik sınıflandırması ("GİZLİ") | `app/server.py` → `security()` + `StatusPanel.tsx` |
 | **Renkler** (zemin/kart/mavi/turuncu/kırmızı/yeşil/altın/metin) | `web/tailwind.config.js` → `theme.extend.colors` |
 | Zemin ışıması, kaydırma çubuğu, temel tipografi | `web/src/index.css` |
 | **Başlık / alt başlık** metni | `web/src/components/Header.tsx` |
@@ -165,7 +161,7 @@ aynı origin'den çalışır ve CORS gerekmez.
 | Profil avatarı (renk/şekil/başlık) | `web/src/components/ProfileAvatar.tsx` |
 | Aşama etiketleri (bulma/üretim/…) | `web/src/components/StageTracker.tsx` → `STAGES` |
 | Hata / boş sonuç / başarı metinleri | `web/src/components/MessageCard.tsx` |
-| Insight akış hızı (token gecikmesi) | `app/adapters/inbound/http/sse.py` → `INSIGHT_TOKEN_DELAY_SEC` sabiti |
+| Insight akış hızı (token gecikmesi) | `app/server.py` → `INSIGHT_TOKEN_DELAY_SEC` sabiti |
 | CSV dosya adı / ayraç / kodlama | `web/src/components/ResultTable.tsx` |
 
 > Her renk değişikliğinden sonra `npm run build` ile `dist/`'i yeniden üretin.
@@ -186,26 +182,17 @@ aynı origin'den çalışır ve CORS gerekmez.
 ## 7. Dosya haritası (arayüz)
 
 ```
-main.py                        CLI giriş noktası (ince)
-server.py                      HTTP/SSE giriş noktası (ince, uvicorn server:app)
+main.py                        TEK giriş noktası (varsayılan: web; --cli: terminal; --reload: geliştirme)
 app/
-  domain/                       AgentResult modeli + Protocol port'ları
-  application/ask_question.py   AskQuestionUseCase (orkestrasyon)
-  adapters/
-    inbound/
-      cli/console.py             terminal döngüsü
-      http/server.py             Starlette routing + statik servis
-      http/sse.py                 SSE akış mantığı
-      http/instrumentation.py     stage/fix event sarmalayıcıları
-      http/dto.py                  sources/security JSON şekillendirme
-    outbound/
-      retrieval/e5_retriever.py    E5 embedding tabanlı tablo bulma
-      llm/ollama_llm.py             Ollama istemcisi
-      llm/prompts.py                 prompt metinleri
-      persistence/duckdb_engine.py   DuckDB + Excel çalıştırma
-      security/sql_guard.py           SELECT-only doğrulama
-      catalog/static_catalog.py        tablo/DDL/passage kataloğu
-  config/container.py            composition root (build_agent())
+  models.py                     AgentResult sonuç paketi
+  catalog.py                    tablo/DDL/passage kataloğu
+  retriever.py                  E5Retriever — E5 embedding tabanlı tablo bulma
+  llm.py                        OllamaLLM istemcisi + prompt metinleri
+  sql_guard.py                  SELECT-only doğrulama
+  engine.py                     DuckDBEngine — DuckDB + Excel çalıştırma
+  agent.py                      Agent (orkestrasyon) + build_agent() fabrikası
+  cli.py                        terminal döngüsü
+  server.py                     Starlette routing + SSE + instrumentation + statik servis
 dist/                          derlenmiş arayüz (npm run build çıktısı)
 web/
   index.html                   HTML kabuğu
@@ -268,5 +255,10 @@ render edin.
 - Aynı anda birden çok soru işlenmez; işlem sürerken giriş kilitlenir.
 - Eski Streamlit arayüzü (`app.py`) **kaldırıldı** (kod tekrarını önlemek için;
   aynı `agent.ask()` etrafında ayrı bir instrumentation katmanı kuruyordu).
-  Tek arayüz artık `server.py` (`app/adapters/inbound/http/`) + `web/` ikilisidir; `streamlit` bağımlılığı da
-  `requirements.txt`'ten çıkarıldı.
+  Tek arayüz artık kök `main.py` (`app/server.py`'yi başlatır) + `web/`
+  ikilisidir; `streamlit` bağımlılığı da `requirements.txt`'ten çıkarıldı.
+- `run.bat` kaldırıldı — tek satırlık bir uvicorn kısayoluydu, `python main.py`
+  ile doğrudan başlatın.
+- Kök `server.py` kaldırıldı: CLI ve web modu ayrı dosyalarda değil, tek
+  `main.py` içinde `--cli`/`--reload` bayraklarıyla yönetiliyor (tek giriş
+  noktası).

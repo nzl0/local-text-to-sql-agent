@@ -11,53 +11,65 @@ Bu proje, yerel ortamda çalışan bir Text-to-SQL ajanıdır. Kullanıcı sorul
 
 ## Proje dosyaları
 
-Backend, **hexagonal (ports & adapters) mimarisiyle** `app/` altında
-organize edilmiştir (detaylı katman açıklaması için `BAKIM.md` Bölüm 1):
+Backend, `app/` altında düz (tek seviyeli) modüller halinde organize
+edilmiştir (detaylı açıklama için `BAKIM.md` Bölüm 1):
 
-- `app/domain/`: `AgentResult` modeli + port arayüzleri (dış kütüphane bağımlılığı yok).
-- `app/application/ask_question.py`: Ana iş akışını yöneten use-case (`AskQuestionUseCase`).
-- `app/adapters/outbound/catalog/static_catalog.py`: Tek doğruluk kaynağı. Tabloların dosya yolu, DDL ve pasaj bilgileri burada tanımlanır.
-- `app/adapters/outbound/retrieval/e5_retriever.py`: E5 embedding tabanlı tablo seçimi.
-- `app/adapters/outbound/llm/ollama_llm.py` + `llm/prompts.py`: Ollama ile SQL üretimi ve sonuç yorumu.
-- `app/adapters/outbound/security/sql_guard.py`: SQL çalıştırılmadan önce tek/salt-okunur bir SELECT olduğunu doğrular.
-- `app/adapters/outbound/persistence/duckdb_engine.py`: DuckDB + pandas ile Excel verilerinin çalıştırılması.
-- `app/adapters/inbound/cli/console.py`: CLI döngüsü (terminalden tek soru-cevap döngüsü).
-- `app/adapters/inbound/http/`: **Birincil arayüzün** sunucusu — `AskQuestionUseCase.ask()`'i SSE üzerinden React arayüzüne açar, `dist/`'i servis eder.
-- `app/config/container.py`: composition root (`build_agent()`).
-- `main.py` / `server.py`: kök seviyesindeki ince giriş noktaları.
+- `app/catalog.py`: Tek doğruluk kaynağı. Tabloların dosya yolu, DDL ve pasaj bilgileri burada tanımlanır.
+- `app/retriever.py`: E5 embedding tabanlı tablo seçimi (`E5Retriever`).
+- `app/llm.py`: Ollama ile SQL üretimi, onarımı ve sonuç yorumu (istemci + prompt metinleri).
+- `app/sql_guard.py`: SQL çalıştırılmadan önce tek/salt-okunur bir SELECT olduğunu doğrular.
+- `app/engine.py`: DuckDB + pandas ile Excel verilerinin çalıştırılması (`DuckDBEngine`).
+- `app/models.py`: `AgentResult` sonuç paketi.
+- `app/agent.py`: Ana iş akışını yöneten `Agent` sınıfı + gerçek bileşenleri kuran `build_agent()`.
+- `app/cli.py`: CLI döngüsü (terminalden tek soru-cevap döngüsü).
+- `app/server.py`: **Birincil arayüzün** sunucusu — `Agent.ask()`'i SSE üzerinden React arayüzüne açar, `dist/`'i servis eder.
+- `main.py` (kök): **tek giriş noktası**. Argümansız çalıştırılınca web arayüzünü başlatır; `--cli` ile aynı dosya terminalden hızlı soru-cevap moduna geçer.
 - `web/`: React/Vite arayüzünün kaynak kodu (`npm run build` ile `dist/`'e derlenir).
-- `run.bat`: Windows'ta web arayüzünü (uvicorn + `server.py`) başlatan kısayol.
 
-Proje tek bir arayüz üzerinden kullanılır: **React arayüzü** (`web/` + `server.py`,
-tarayıcıdan `http://localhost:8000`). `main.py`, arayüzsüz/terminalden hızlı test
-için ayrı bir CLI giriş noktası olarak kalır; birbirine bağımlı değillerdir.
+Proje tek bir arayüz üzerinden kullanılır: **React arayüzü** (`web/` + `main.py`,
+tarayıcıdan `http://localhost:8000`). Terminalden hızlı test için `python main.py --cli`
+aynı dosyanın bir modu olarak kullanılabilir.
 
 ## Gereksinimler
-- Python 3.13.14
+- Python 3.10+ (proje bağımlılıkları belirli bir sürüme sıkı bağlı değil,
+  `requirements.txt`'te versiyon pin'i yok)
 - Node.js 18+ ve npm (yalnızca arayüzü *derlemek* için; derlenmiş `dist/`
-  çalışırken gerekmez)
-- Ollama kurulu ve çalışıyor olmalı
-- İnternet erişimi varsa ilk çalıştırmada embedding modeli indirilebilir
+  çalışırken gerekmez — `dist/` klasörü zaten hazır geliyorsa Node kurmaya
+  gerek yok)
+- Ollama kurulu ve çalışıyor olmalı: https://ollama.com/download
+- İnternet erişimi: ilk çalıştırmada Ollama modeli ve embedding modeli
+  (`models/e5-large` klasörü yoksa) otomatik indirilir
 
 ## Kurulum
-1. Sanal ortam oluşturun:
-   `python -m venv .venv`
+1. Sanal ortam oluşturun: `python -m venv .venv`
 2. Sanal ortamı etkinleştirin.
-3. Bağımlılıkları kurun:
-   `pip install -r requirements.txt`
-4. Ollama modelini indirin:
-   `ollama pull qwen3.5:4b`
-5. Arayüzü derleyin (bkz. `BAKIM.md` Bölüm 3):
+3. Bağımlılıkları kurun: `pip install -r requirements.txt`
+4. Ollama modelini indirin: `ollama pull qwen3.5:4b`
+5. Arayüzü derleyin (yalnızca `dist/` yoksa; bkz. `BAKIM.md` Bölüm 3):
    `cd web && npm install && npm run build`
 
 ## Çalıştırma
-**Web arayüzü** (önerilen, Windows'ta):
-- `./.venv/Scripts/python.exe -m uvicorn server:app --host 0.0.0.0 --port 8000`
-- veya `run.bat`
+Tek giriş noktası `main.py`'dir:
+
+**Web arayüzü** (varsayılan, önerilen):
+- `./.venv/Scripts/python.exe main.py`
 - Tarayıcıdan `http://localhost:8000`. Detaylı mimari/geliştirme modu için `BAKIM.md`.
 
 **CLI** (terminalden, arayüzsüz hızlı test için):
-- `./.venv/Scripts/python.exe main.py`
+- `./.venv/Scripts/python.exe main.py --cli`
+
+## Başka bir bilgisayara taşırken
+Proje klasörünü kopyalarken şunları **dahil etmeyin** (her makinede yeniden
+oluşturulur / gereksiz yer kaplar):
+- `.venv/` (yeni makinede sıfırdan oluşturulacak)
+- `web/node_modules/` (arayüzü yeniden derlemeyecekseniz gerekmez)
+- `__pycache__/`
+- `models/e5-large/` (~2.2 GB; internet varsa hedef makinede otomatik iner,
+  taşımak zorunlu değil — taşırsanız ilk çalıştırma daha hızlı olur ve
+  internet gerekmez)
+
+`dist/` klasörünü **mutlaka dahil edin** — derlenmiş arayüz orada durur ve
+`git` tarafından izlenmediği için ayrıca dikkat gerektirir.
 
 ## Model yapılandırması
 Ollama modeli ortam değişkenleriyle ayarlanabilir:
